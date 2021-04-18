@@ -205,7 +205,7 @@
            (or (ignore-errors (parse-foreign-type spec))
                *the-ffi-void-type*))
          (make-type-name (name)
-	   (escape-foreign-name (string name))))
+	         (escape-foreign-name (string name))))
     (cond ((eq (car (last spec)) 'c::*) *the-ffi-pointer-type*)
           ((member (car spec) '(c::|struct| c::|union|))
            (parse-it-or-lose (mapcar #'make-type-name spec)))
@@ -215,170 +215,170 @@
            ;;; A qualified primitive type
            (let* ((primitive (parse-it-or-lose (make-type-name (car (last spec))))))
              (if (eq primitive *the-ffi-void-type*)
-               primitive
-               (let* ((long 0)
-                      (explicitly-signed nil))
-                 (declare (fixnum long))
-                 (if
-                   (dolist (token (butlast spec) t)
-                     (case token
-                       (c::|unsigned| (setq explicitly-signed :unsigned))
-                       (c::|signed| (setq explicitly-signed :signed))
-                       (c::|long| (incf long))
-                       (c::|short| (decf long))
-                       (t (return nil))))
-                   (cond ((typep primitive 'foreign-integer-type)
-                          (let* ((prim-bits (foreign-type-bits primitive))
-                                 (prim-signed (foreign-integer-type-signed primitive)))
-                            (if (> long 1)
-                              (make-foreign-integer-type :bits 64
-                                                         :signed (or (not explicitly-signed)
-                                                                     (eq explicitly-signed :signed)))
-                              (if (< long 0)
-                                (make-foreign-integer-type :bits 16
-                                                           :signed (or (not explicitly-signed)
-                                                                       (eq explicitly-signed :signed)))
-                                (if (= long 1)
-                                  (make-foreign-integer-type :bits 32
-                                                             :signed (or (not explicitly-signed)
-                                                                         (eq explicitly-signed :signed)))
-                                  (make-foreign-integer-type :bits prim-bits
-                                                             :signed
-                                                             (case explicitly-signed
-                                                               (:signed t)
-                                                               (:unsigned nil)
-                                                               (t prim-signed))))))))
-                         ((and (= long 1)
-                               (typep primitive 'foreign-double-float-type))
-                          (parse-it-or-lose :long-double))
-                         (t *the-ffi-void-type*))
-                   *the-ffi-void-type*))))))))
+                 primitive
+                 (let* ((long 0)
+                        (explicitly-signed nil))
+                   (declare (fixnum long))
+                   (if
+                    (dolist (token (butlast spec) t)
+                      (case token
+                        (c::|unsigned| (setq explicitly-signed :unsigned))
+                        (c::|signed| (setq explicitly-signed :signed))
+                        (c::|long| (incf long))
+                        (c::|short| (decf long))
+                        (t (return nil))))
+                    (cond ((typep primitive 'foreign-integer-type)
+                           (let* ((prim-bits (foreign-type-bits primitive))
+                                  (prim-signed (foreign-integer-type-signed primitive)))
+                             (if (> long 1)
+                                 (make-foreign-integer-type :bits 64
+                                                            :signed (or (not explicitly-signed)
+                                                                        (eq explicitly-signed :signed)))
+                                 (if (< long 0)
+                                     (make-foreign-integer-type :bits 16
+                                                                :signed (or (not explicitly-signed)
+                                                                            (eq explicitly-signed :signed)))
+                                     (if (= long 1)
+                                         (make-foreign-integer-type :bits 32
+                                                                    :signed (or (not explicitly-signed)
+                                                                                (eq explicitly-signed :signed)))
+                                         (make-foreign-integer-type :bits prim-bits
+                                                                    :signed
+                                                                    (case explicitly-signed
+                                                                      (:signed t)
+                                                                      (:unsigned nil)
+                                                                      (t prim-signed))))))))
+                          ((and (= long 1)
+                                (typep primitive 'foreign-double-float-type))
+                           (parse-it-or-lose :long-double))
+                          (t *the-ffi-void-type*))
+                    *the-ffi-void-type*))))))))
                                                                
 (defun eval-parsed-c-expression (expression constant-alist)
   (if (atom expression)
-    (if (identifierp expression)
-      (find-constant expression constant-alist)
-      (if (typep expression 'character)
-        (char-code expression)
-        expression))
-    (let* ((operator (car expression))
-           (operands (cdr expression))
-           (noperands (length operands)))
-      (case operator
-        (c::resolve-type (let* ((foreign-type  (ignore-errors (parse-c-ffi-type (car operands)))))
-                           (when foreign-type
-                             (setf (cdr expression) nil
-                                   (car expression) foreign-type)
-                             )))
-        (c::curly-bracketed-list ())
-        (t
-         (if (typep operator 'foreign-type)
-           operator
-         (when (do* ((tail (cdr expression) (cdr tail)))
-                    ((null tail) t)
-                 (let* ((expr (car tail))
-                        (value (eval-parsed-c-expression expr constant-alist)))
-                   (unless value (return))
-                   (unless (eq expr value)
-                     (rplaca tail value))))
-           (case noperands
-             (1
-              (let* ((operand (cadr expression)))
-                (case operator
-                  (c::! (if (zerop operand) 1 0))
-                  (c::- (- operand))
-		  (c::+ operand)
-                  (c::~ (lognot operand))
-                  (c::size-of
-                   (let* ((bits (ignore-errors (ensure-foreign-type-bits operand))))
-                     (when bits
-                       (ash (+ bits 7) -3))))
-                  (t
-                   ;(break "~s" expression)
-		   nil))))
-             (2
-              (let* ((a (car operands))
-                     (b (cadr operands)))
-                (case operator
-                  (c::<< (ash a b))
-                  (c::>> (ash a (- b)))
-                  (c::* (* a b))
-                  (c::/ (if (zerop b) 0 (values (floor a b)))) ; or maybe TRUNCATE ?
-                  (c::+ (+ a b))
-                  (c::- (- a b))
-                  (c::\| (logior a b))
-                  (c::\& (logand a b))
-                  (c::cast (if (foreign-typep (setq b (eval-parsed-c-expression b constant-alist)) a)
-                             b
-                             (if (and (typep a 'foreign-integer-type)
-                                      (not (foreign-integer-type-signed a))
-                                      (typep b 'integer)
-                                      (not (> (integer-length b)
-                                              (foreign-integer-type-bits a))))
-                               (logand b (1- (ash 1 (foreign-integer-type-bits a))))
-                               (if (and (typep a 'foreign-pointer-type)
-                                        (typep b 'integer)
-                                        (<= (integer-length b) 16))
-                                 (progn                                   
-                                   (%int-to-ptr (logand b #xffffffff)))))))
+      (if (identifierp expression)
+          (find-constant expression constant-alist)
+          (if (typep expression 'character)
+              (char-code expression)
+              expression))
+      (let* ((operator (car expression))
+             (operands (cdr expression))
+             (noperands (length operands)))
+        (case operator
+          (c::resolve-type (let* ((foreign-type  (ignore-errors (parse-c-ffi-type (car operands)))))
+                             (when foreign-type
+                               (setf (cdr expression) nil
+                                     (car expression) foreign-type)
+                               )))
+          (c::curly-bracketed-list ())
+          (t
+           (if (typep operator 'foreign-type)
+               operator
+               (when (do* ((tail (cdr expression) (cdr tail)))
+                          ((null tail) t)
+                       (let* ((expr (car tail))
+                              (value (eval-parsed-c-expression expr constant-alist)))
+                         (unless value (return))
+                         (unless (eq expr value)
+                           (rplaca tail value))))
+                 (case noperands
+                   (1
+                    (let* ((operand (cadr expression)))
+                      (case operator
+                        (c::! (if (zerop operand) 1 0))
+                        (c::- (- operand))
+		                    (c::+ operand)
+                        (c::~ (lognot operand))
+                        (c::size-of
+                         (let* ((bits (ignore-errors (ensure-foreign-type-bits operand))))
+                           (when bits
+                             (ash (+ bits 7) -3))))
+                        (t
+                         (break "~s" expression)
+		                     nil))))
+                   (2
+                    (let* ((a (car operands))
+                           (b (cadr operands)))
+                      (case operator
+                        (c::<< (ash a b))
+                        (c::>> (ash a (- b)))
+                        (c::* (* a b))
+                        (c::/ (if (zerop b) 0 (values (floor a b)))) ; or maybe TRUNCATE ?
+                        (c::+ (+ a b))
+                        (c::- (- a b))
+                        (c::\| (logior a b))
+                        (c::\& (logand a b))
+                        (c::cast (if (foreign-typep (setq b (eval-parsed-c-expression b constant-alist)) a)
+                                     b
+                                     (if (and (typep a 'foreign-integer-type)
+                                              (not (foreign-integer-type-signed a))
+                                              (typep b 'integer)
+                                              (not (> (integer-length b)
+                                                      (foreign-integer-type-bits a))))
+                                         (logand b (1- (ash 1 (foreign-integer-type-bits a))))
+                                         (if (and (typep a 'foreign-pointer-type)
+                                                  (typep b 'integer)
+                                                  (<= (integer-length b) 16))
+                                             (progn                                   
+                                               (%int-to-ptr (logand b #xffffffff)))))))
                                
                                            
-                  (t 
-		   ;(break "binary op = ~s ~s ~s" operator a b)
-		   nil))))
-             (t
-              ;(break "expression = ~s" expression)
-	      nil)))))))))
+                        (t 
+                         (break "binary op = ~s ~s ~s" operator a b)
+		                     nil))))
+                   (t
+                    (break "expression = ~s" expression)
+	                  nil)))))))))
 
 (defun eval-c-expression (macro constant-alist macro-table)
   (let* ((string (ffi-macro-expansion macro))
          (len (length string)))
     (if (= len 0)
-      1
-      (progn
-        (unless (ffi-macro-tokens macro)
-          (let* ((transitive (gethash (ffi-macro-expansion macro) macro-table)))
-            (if transitive
-              (setf (ffi-macro-tokens macro) transitive
-                    (gethash (ffi-macro-name macro) macro-table) transitive)
-              (multiple-value-bind (tokens error) (ignore-errors (string-to-tokens string))
-                (if error
-                  (setf (ffi-macro-disposition macro) :bad-tokenize)
-                  (setf (ffi-macro-tokens macro) tokens))))))
-        (unless (ffi-macro-expression macro)
-          (let* ((tokens (ffi-macro-tokens macro)))
-            (when tokens
-              (multiple-value-bind (expression error)
-                  (ignore-errors (parse-c-expression tokens
-                                                     :constants constant-alist
-                                                     :expand-macros macro-table ))
-                (if (or error (null expression))
-                  (progn
-                    ;(format t "~& parse failed: ~s ~s" (ffi-macro-name macro)  string)
-                    ;(format t "~&  tokens = ~s, error = ~a" tokens error)
-                    (setf (ffi-macro-disposition macro) :bad-parse))
-                  (setf (ffi-macro-expression macro) expression))))))
-        (let* ((expression (ffi-macro-expression macro)))
-          (when expression (values (eval-parsed-c-expression expression constant-alist) t)))))))
+        1
+        (progn
+          (unless (ffi-macro-tokens macro)
+            (let* ((transitive (gethash (ffi-macro-expansion macro) macro-table)))
+              (if transitive
+                  (setf (ffi-macro-tokens macro) transitive
+                        (gethash (ffi-macro-name macro) macro-table) transitive)
+                  (multiple-value-bind (tokens error) (ignore-errors (string-to-tokens string))
+                    (if error
+                        (setf (ffi-macro-disposition macro) :bad-tokenize)
+                        (setf (ffi-macro-tokens macro) tokens))))))
+          (unless (ffi-macro-expression macro)
+            (let* ((tokens (ffi-macro-tokens macro)))
+              (when tokens
+                (multiple-value-bind (expression error)
+                    (ignore-errors (parse-c-expression tokens
+                                                       :constants constant-alist
+                                                       :expand-macros macro-table ))
+                  (if (or error (null expression))
+                      (progn
+                        (format t "~& parse failed: ~s ~s" (ffi-macro-name macro)  string)
+                        (format t "~&  tokens = ~s, error = ~a" tokens error)
+                        (setf (ffi-macro-disposition macro) :bad-parse))
+                      (setf (ffi-macro-expression macro) expression))))))
+          (let* ((expression (ffi-macro-expression macro)))
+            (when expression (values (eval-parsed-c-expression expression constant-alist) t)))))))
 
 ;;; Repeatedly iterate over the macros until nothing new's defined.
 (defun process-defined-macros (ffi-macros constant-alist parameterized-macros)
   (let* ((new-def ()))
     (loop
-        (setq new-def nil)
-        (dolist (macro ffi-macros)
-          (unless (ffi-macro-disposition macro)
-            (let* ((expansion (ffi-macro-expansion macro))
-                   (name (ffi-macro-name macro))
-                   (value nil))
-              (if (string= name expansion)
+      (setq new-def nil)
+      (dolist (macro ffi-macros)
+        (unless (ffi-macro-disposition macro)
+          (let* ((expansion (ffi-macro-expansion macro))
+                 (name (ffi-macro-name macro))
+                 (value nil))
+            (if (string= name expansion)
                 (setf (ffi-macro-disposition macro) t)
                 (when (setq value (eval-c-expression macro constant-alist parameterized-macros))
                   (push (cons name value) constant-alist)
                   (setf (ffi-macro-disposition macro) t)
                   (setq new-def t))))))
-        (unless new-def
-          (return (values (reverse constant-alist) nil))))))
+      (unless new-def
+        (return (values (reverse constant-alist) nil))))))
 
 (defun reference-ffi-type (spec)
   (case (car spec)
@@ -395,10 +395,10 @@
     (t
      (list :primitive
            (ecase (car spec)
-	     (:char (if (getf (ftd-attributes *parse-ffi-target-ftd*)
+	           (:char (if (getf (ftd-attributes *parse-ffi-target-ftd*)
                               :signed-char)
-		      '(:signed 8)
-		      '(:unsigned 8)))
+		                    '(:signed 8)
+		                    '(:unsigned 8)))
              (:signed-char  '(:signed 8))
              (:unsigned-char '(:unsigned 8))
              (:short '(:signed 16))
@@ -435,7 +435,7 @@
              (:complex-double :complex-double)
              (:complex-long-double :complex-long-float)
              (:long-long-long :long-long-long)
-             #|(:void :void)|#)))))
+             (:void :void))))))
              
              
 (defun process-ffi-fieldlist (fields)
@@ -458,10 +458,10 @@
     (let* ((union (find-or-create-ffi-union string)))
       (setf (ffi-union-ordinal union) (incf *ffi-ordinal*))
       (when alignform
-	(setf (ffi-union-alt-alignment-bits union) (cadr alignform)))
+	      (setf (ffi-union-alt-alignment-bits union) (cadr alignform)))
       (unless (ffi-union-fields union)
-	(setf (ffi-union-fields union)
-	      (process-ffi-fieldlist fields)))
+	      (setf (ffi-union-fields union)
+	            (process-ffi-fieldlist fields)))
       union)))
 
 (defun process-ffi-transparent-union (form)
@@ -471,10 +471,10 @@
     (let* ((union (find-or-create-ffi-transparent-union string)))
       (setf (ffi-transparent-union-ordinal union) (incf *ffi-ordinal*))
       (when alignform
-	(setf (ffi-transparent-union-alt-alignment-bits union) (cadr alignform)))
+	      (setf (ffi-transparent-union-alt-alignment-bits union) (cadr alignform)))
       (unless (ffi-transparent-union-fields union)
-	(setf (ffi-transparent-union-fields union)
-	      (process-ffi-fieldlist fields)))
+	      (setf (ffi-transparent-union-fields union)
+	            (process-ffi-fieldlist fields)))
       union)))
 
 (defun process-ffi-struct (form)
@@ -484,10 +484,10 @@
     (let* ((struct (find-or-create-ffi-struct string)))
       (setf (ffi-struct-ordinal struct) (incf *ffi-ordinal*))
       (when alignform
-	(setf (ffi-struct-alt-alignment-bits struct) (cadr alignform)))
+	      (setf (ffi-struct-alt-alignment-bits struct) (cadr alignform)))
       (unless (ffi-struct-fields struct)
-	(setf (ffi-struct-fields struct)
-	      (process-ffi-fieldlist fields)))
+	      (setf (ffi-struct-fields struct)
+	            (process-ffi-fieldlist fields)))
       struct)))
 
 (defun process-ffi-objc-class (form)
@@ -513,19 +513,19 @@
     (let* ((flags ()))
       (if (or (eq method-type :objc-class-method)
               (eq method-type :objc-protocol-class-method))
-        (setf (getf flags :class) t))
+          (setf (getf flags :class) t))
       (if (or (eq method-type :objc-protocol-class-method)
               (eq method-type :objc-protocol-instance-method))
-        (setf (getf flags :protocol) t))
+          (setf (getf flags :protocol) t))
       (let* ((message (find-or-create-ffi-objc-message message-name))
              (class-method-p (getf flags :class))
              (method
-              (make-ffi-objc-method :class-name class-name
-                                    :arglist (mapcar #'reference-ffi-type
-                                                     arglist)
-                                    :result-type (reference-ffi-type
-                                                  result-type)
-                                    :flags flags)))
+               (make-ffi-objc-method :class-name class-name
+                                     :arglist (mapcar #'reference-ffi-type
+                                                      arglist)
+                                     :result-type (reference-ffi-type
+                                                   result-type)
+                                     :flags flags)))
         (unless (dolist (m (ffi-objc-message-methods message))
                   (when (and (equal (ffi-objc-method-class-name m)
                                     class-name)
@@ -588,18 +588,17 @@
 (defun ensure-referenced-type-defined (spec)
   (declare (ignorable spec))
   (when nil
-  (ecase (car spec)
-    (:primitive)
-    (:typedef (define-typedef-from-ffi-info (cadr spec)))
-    (:struct (ensure-struct-defined (cadr spec)))
-    (:union (ensure-union-defined (cadr spec)))
-    (:transparent-union (ensure-transparent-union-defined (cadr spec)))
-    (:pointer (ensure-referenced-type-defined (cadr spec)))
-    (:array (ensure-referenced-type-defined (caddr spec)))
-    (:function (dolist (arg (ffi-function-arglist (cadr spec)))
-                 (ensure-referenced-type-defined arg))
-               (ensure-referenced-type-defined (ffi-function-return-value (cadr spec))))
-    )))
+    (ecase (car spec)
+      (:primitive)
+      (:typedef (define-typedef-from-ffi-info (cadr spec)))
+      (:struct (ensure-struct-defined (cadr spec)))
+      (:union (ensure-union-defined (cadr spec)))
+      (:transparent-union (ensure-transparent-union-defined (cadr spec)))
+      (:pointer (ensure-referenced-type-defined (cadr spec)))
+      (:array (ensure-referenced-type-defined (caddr spec)))
+      (:function (dolist (arg (ffi-function-arglist (cadr spec)))
+                   (ensure-referenced-type-defined arg))
+       (ensure-referenced-type-defined (ffi-function-return-value (cadr spec)))))))
 
   
 (defun ensure-fields-defined (fields)
@@ -644,14 +643,14 @@
 (defun ensure-union-defined (u)
   (let* ((name (ffi-union-name u)))
     (if name
-      (define-union-from-ffi-info u)
-      (ensure-fields-defined (ffi-union-fields u)))))
+        (define-union-from-ffi-info u)
+        (ensure-fields-defined (ffi-union-fields u)))))
 
 (defun ensure-transparent-union-defined (u)
   (let* ((name (ffi-transparent-union-name u)))
     (if name
-      (define-transparent-union-from-ffi-info u)
-      (ensure-fields-defined (ffi-transparent-union-fields u)))))
+        (define-transparent-union-from-ffi-info u)
+        (ensure-fields-defined (ffi-transparent-union-fields u)))))
 
 (defun record-global-struct (s)
   (when (and *ffi-global-structs* (ffi-struct-fields s))
@@ -668,8 +667,8 @@
 (defun ensure-struct-defined (s)
   (let* ((name (ffi-struct-name s)))
     (if (typep name 'keyword)
-      (define-struct-from-ffi-info s)
-      (ensure-fields-defined (ffi-struct-fields s)))))
+        (define-struct-from-ffi-info s)
+        (ensure-fields-defined (ffi-struct-fields s)))))
 
 (defun record-global-typedef (def)
   (when *ffi-global-typedefs*
@@ -681,8 +680,8 @@
     (record-global-typedef def)
     (let* ((target (ffi-typedef-type def)))
       (unless (and (consp target)
-		   (member (car target) '(:struct :union :transparent-union :primitive)))
-	(ensure-referenced-type-defined target)))))
+		               (member (car target) '(:struct :union :transparent-union :primitive)))
+	      (ensure-referenced-type-defined target)))))
 
 (defun record-global-constant (name val)
   (when *ffi-global-constants*
@@ -708,13 +707,13 @@
 (defun record-global-function (ffi-function)
   (when *ffi-global-functions*
     (setf (gethash (ffi-function-string ffi-function) *ffi-global-functions*)
-	  ffi-function)))
+	        ffi-function)))
 
 (defun emit-function-decl (ffi-function)
   (let* ((args (ffi-function-arglist ffi-function))
          (retval (ffi-function-return-value ffi-function)))
     (if (eq (car (last args)) *ffi-void-reference*)
-      (setq args (butlast args)))
+        (setq args (butlast args)))
     (dolist (arg args) (ensure-referenced-type-defined arg))
     (ensure-referenced-type-defined retval)
     (record-global-function ffi-function)))
@@ -722,7 +721,7 @@
 
 (defun read-ffi-toplevel-form (stream eof-value)
   (loop
-    (let* ((ch (peek-char  nil stream nil eof-value)))
+    (let* ((ch (peek-char nil stream nil eof-value)))
       (cond ((eq ch eof-value) (return eof-value))
             ((eql ch #\() (return (read stream nil eof-value)))
             (t (read-line stream))))))
@@ -751,15 +750,14 @@
                 ((:objc-class-method
                   :objc-instance-method
                   :objc-protocol-class-method
-                  :objc-protocol-instance-method
-                  )
+                  :objc-protocol-instance-method)
                  (process-ffi-objc-method form))
                 (:function (push (process-ffi-function form) defined-functions))
                 (:macro (let* ((m (process-ffi-macro form))
                                (args (ffi-macro-args m)))
                           (if args
-                            (setf (gethash (string (ffi-macro-name m)) argument-macros) args)
-                            (push m defined-macros))))
+                              (setf (gethash (string (ffi-macro-name m)) argument-macros) args)
+                              (push m defined-macros))))
                 (:type (push (process-ffi-typedef form) defined-types))
                 (:var (push (process-ffi-var form) defined-vars))
                 (:enum-ident (push (process-ffi-enum-ident form) defined-constants))
@@ -770,13 +768,13 @@
             (let* ((m (process-ffi-macro override))
                    (args (ffi-macro-args m)))
               (if args
-                (setf (gethash (string (ffi-macro-name m)) argument-macros) args)
-                (push m defined-macros))))
+                  (setf (gethash (string (ffi-macro-name m)) argument-macros) args)
+                  (push m defined-macros))))
           (multiple-value-bind (new-constants new-macros)
               (process-defined-macros defined-macros (reverse defined-constants) argument-macros)
-	    ;; If we're really lucky, we might be able to turn some C macros
-	    ;; into lisp macros.  We can probably turn some C macros into
-	    ;; lisp constants.
+	          ;; If we're really lucky, we might be able to turn some C macros
+	          ;; into lisp macros.  We can probably turn some C macros into
+	          ;; lisp constants.
             (declare (ignore new-macros))
             (dolist (x (reverse new-constants))
               (emit-ffi-constant (car x) (cdr x)))
@@ -797,24 +795,24 @@
          (*parse-ffi-target-ftd* ftd)
          (*target-ftd* ftd)
          (*target-backend* backend)
-	 (d (use-interface-dir dirname ftd))
-	 (interface-dir (merge-pathnames
-			 (interface-dir-subdir d)
-			 (ftd-interface-db-directory ftd)))
-	 (*prepend-underscores-to-ffi-function-names*
-          (getf (ftd-attributes ftd) :prepend-underscores))
-	 (*ffi-global-typedefs* (make-hash-table :test 'string= :hash-function 'sxhash))
-	 (*ffi-global-unions* (make-hash-table :test 'string= :hash-function 'sxhash))
+	       (d (use-interface-dir dirname ftd))
+	       (interface-dir (merge-pathnames
+			                   (interface-dir-subdir d)
+			                   (ftd-interface-db-directory ftd)))
+	       (*prepend-underscores-to-ffi-function-names*
+           (getf (ftd-attributes ftd) :prepend-underscores))
+	       (*ffi-global-typedefs* (make-hash-table :test 'string= :hash-function 'sxhash))
+	       (*ffi-global-unions* (make-hash-table :test 'string= :hash-function 'sxhash))
          (*ffi-global-transparent-unions* (make-hash-table :test 'string= :hash-function 'sxhash))
-	 (*ffi-global-structs* (make-hash-table :test 'string= :hash-function 'sxhash))
+	       (*ffi-global-structs* (make-hash-table :test 'string= :hash-function 'sxhash))
          (*ffi-global-objc-classes* (make-hash-table :test 'string= :hash-function 'sxhash))
          (*ffi-global-objc-messages* (make-hash-table :test 'string= :hash-function 'sxhash)) 
-	 (*ffi-global-functions* (make-hash-table :test 'string= :hash-function 'sxhash))
-	 (*ffi-global-constants* (make-hash-table :test 'string= :hash-function 'sxhash))
+	       (*ffi-global-functions* (make-hash-table :test 'string= :hash-function 'sxhash))
+	       (*ffi-global-constants* (make-hash-table :test 'string= :hash-function 'sxhash))
          (*ffi-global-vars* (make-hash-table :test 'string= :hash-function 'sxhash)))
          
     (dolist (f (directory (merge-pathnames ";C;**;*.ffi"
-					   interface-dir)))
+					                                 interface-dir)))
       (format t "~&~s ..." f)
       (parse-ffi f )
       (format t "~&"))
@@ -823,37 +821,37 @@
                                        interface-dir))
       (maphash #'(lambda (name def)
                    (db-define-constant constants-cdbm name def))
-	       *ffi-global-constants*))
+	             *ffi-global-constants*))
     (with-new-db-file (types-cdbm (merge-pathnames
-				       "new-types.cdb"
-				       interface-dir))
+				                           "new-types.cdb"
+				                           interface-dir))
       (maphash #'(lambda (name def)
-		   (declare (ignore name))
-		   (save-ffi-typedef types-cdbm def))
-	       *ffi-global-typedefs*))
+		               (declare (ignore name))
+		               (save-ffi-typedef types-cdbm def))
+	             *ffi-global-typedefs*))
     (with-new-db-file (records-cdbm (merge-pathnames
                                      "new-records.cdb"
                                      interface-dir))
       (maphash #'(lambda (name def)
-		   (declare (ignore name))
+		               (declare (ignore name))
                    (save-ffi-union records-cdbm def))
-	       *ffi-global-unions*)
+	             *ffi-global-unions*)
       (maphash #'(lambda (name def)
                    (declare (ignore name))
                    (save-ffi-transparent-union records-cdbm def))
                *ffi-global-transparent-unions*)
                          
       (maphash #'(lambda (name def)
-		   (declare (ignore name))
-		   (save-ffi-struct records-cdbm def))
-	       *ffi-global-structs*))
+		               (declare (ignore name))
+		               (save-ffi-struct records-cdbm def))
+	             *ffi-global-structs*))
     (with-new-db-file (function-cdbm (merge-pathnames
-					   "new-functions.cdb"
-					   interface-dir))
+					                            "new-functions.cdb"
+					                            interface-dir))
       (maphash #'(lambda (name def)
-		   (declare (ignore name))
-		   (save-ffi-function function-cdbm def))
-	       *ffi-global-functions*))
+		               (declare (ignore name))
+		               (save-ffi-function function-cdbm def))
+	             *ffi-global-functions*))
     (with-new-db-file (class-cdbm (merge-pathnames
                                    "new-objc-classes.cdb"
                                    interface-dir))
@@ -862,8 +860,8 @@
                    (save-ffi-objc-class class-cdbm def))
                *ffi-global-objc-classes*))
     (with-new-db-file (vars-cdbm (merge-pathnames
-                             "new-vars.cdb"
-                             interface-dir))
+                                  "new-vars.cdb"
+                                  interface-dir))
       (maphash #'(lambda (name type)
                    (db-define-var vars-cdbm name type))
                *ffi-global-vars*))
@@ -896,7 +894,7 @@
     (labels ((read-c-operator (stream char)
                (declare (ignore char))
                (loop with decision-tree = decision-tree
-                     as char = (read-char stream nil nil)   ; eof => nil which works too
+                     as char = (read-char stream nil nil) ; eof => nil which works too
                      as elem = (assoc char decision-tree)
                      do (unless elem
                           (unread-char char stream)
@@ -924,14 +922,14 @@
                    (alist nil))
                (setq chars-so-far (append chars-so-far (list next-char)))
                (loop while operators
-                 as key = (key (first operators))
-                 while (every #'char= key chars-so-far)
-                 do (if (= (length key) (length chars-so-far))
-                      (push (cons nil (val (pop operators))) alist)
-                      (multiple-value-bind (remaining-operators elem)
-                          (recurse operators chars-so-far)
-                        (push elem alist)
-                        (setq operators remaining-operators))))
+                     as key = (key (first operators))
+                     while (every #'char= key chars-so-far)
+                     do (if (= (length key) (length chars-so-far))
+                            (push (cons nil (val (pop operators))) alist)
+                            (multiple-value-bind (remaining-operators elem)
+                                (recurse operators chars-so-far)
+                              (push elem alist)
+                              (setq operators remaining-operators))))
                (values operators 
                        (cons next-char (if (cdr alist) alist (cdar alist))))))
            (key (operator)
@@ -976,8 +974,8 @@
                                                (setq char (read-char stream nil nil))
                                             until (= count 3)
                                             finally 
-                                              (unread-char char stream)
-                                              (return (code-char sum)))))
+                                               (unread-char char stream)
+                                               (return (code-char sum)))))
                           ((char= char #\x)
                            (setq char (loop with sum = 0
                                             as char = (read-char stream)
@@ -986,46 +984,45 @@
                                                       (char<= #\a char #\f))
                                             do (setq sum (+ (* sum 16) (digit-char-p char 16)))
                                             finally 
-                                              (unread-char char stream)
-                                              (return (code-char sum)))))))))
+                                               (unread-char char stream)
+                                               (return (code-char sum)))))))))
         collect char into chars))
 
 (dolist (char '(#\_))
   (set-syntax-from-char char #\A *c-readtable*))
 
-(dolist (op '( (c::! c::!=)
-               ((\" c-read-string nil))
-               (|#| |##|)            ; # and ## are pre-processor operators
-               (c::% c::%=)
-               (c::& c::&= c::&&)
-               ((\' c-read-string t))
-               (c::\()
-               (c::\))
-               (c::* c::*=)
-               (c::+ c::+= c::++)
-               (c::- c::-= c::-- c::->)
-               (c::\,)
-               (c::|.| c::|.*| c::|..| c::|...|)                 ; .01 will fail to parse as 0.01
-               (c::/ c::/= (// c-read-line-comment) (/* c-read-block-comment))
-               (c::\: c::\:\:)
-               (c::\;)
-               (c::< c::<= c::<< c::<<=)
-               (c::= c::==)
-               (c::> c::>= c::>> c::>>=)
-               (c::?)
-               (c::[)
-               (c::\\)
-               (c::])
-               (c::^ c::^=)
-               (c::{)
-               (c::\| c::\|= c::\|\|)
-               (c::})
-               (c::~)
-               ;; C++ doesn't define any meaning for these, treat them as operators
-               (c::\$)
-               (c::\@)
-               (c::\`)
-               ))
+(dolist (op '((c::! c::!=)
+              ((\" c-read-string nil))
+              (|#| |##|)        ; # and ## are pre-processor operators
+              (c::% c::%=)
+              (c::& c::&= c::&&)
+              ((\' c-read-string t))
+              (c::\()
+              (c::\))
+              (c::* c::*=)
+              (c::+ c::+= c::++)
+              (c::- c::-= c::-- c::->)
+              (c::\,)
+              (c::|.| c::|.*| c::|..| c::|...|) ; .01 will fail to parse as 0.01
+              (c::/ c::/= (// c-read-line-comment) (/* c-read-block-comment))
+              (c::\: c::\:\:)
+              (c::\;)
+              (c::< c::<= c::<< c::<<=)
+              (c::= c::==)
+              (c::> c::>= c::>> c::>>=)
+              (c::?)
+              (c::[)
+              (c::\\)
+              (c::])
+              (c::^ c::^=)
+              (c::{)
+              (c::\| c::\|= c::\|\|)
+              (c::})
+              (c::~)
+              ;; C++ doesn't define any meaning for these, treat them as operators
+              (c::\$)
+              (c::\@)
+              (c::\`)))
   (set-macro-character (char (string (if (atom (car op)) (car op) (caar op))) 0)
                        (operator-macro op)
                        nil              ;token-terminating
@@ -1045,14 +1042,14 @@
 
 (defun next-token (stream)
   (if *pending-tokens*
-    (pop *pending-tokens*)
-    (do* ((tok (read-preserving-whitespace stream nil :eof)
-                       (read-preserving-whitespace stream nil :eof)))
-                 ((or (not (eq tok *backslash-symbol*))
-                      (not (eq (peek-char nil stream nil nil) #\Newline)))
-                  tok)     
-	     ;; Consume the #\newline that followed #\\.  Yecch.
-	     (read-char stream nil nil))))
+      (pop *pending-tokens*)
+      (do* ((tok (read-preserving-whitespace stream nil :eof)
+                 (read-preserving-whitespace stream nil :eof)))
+           ((or (not (eq tok *backslash-symbol*))
+                (not (eq (peek-char nil stream nil nil) #\Newline)))
+            tok)     
+	      ;; Consume the #\newline that followed #\\.  Yecch.
+	      (read-char stream nil nil))))
               
 (defun string-to-tokens (string)
   (with-input-from-string (stream string)
@@ -1060,22 +1057,22 @@
            (*readtable* *c-readtable*)
            (tokens ()))
       (loop
-          (let* ((token (next-token stream)))
-            (when (eq token :eof)
-              (return (nreverse tokens)))
-            (push token tokens))))))
+        (let* ((token (next-token stream)))
+          (when (eq token :eof)
+            (return (nreverse tokens)))
+          (push token tokens))))))
 
 
 (defun identifierp (token)
   (and (symbolp token)
        (let ((char (char (symbol-name token) 0)))
-	 (or (alpha-char-p char) (char= char #\_)))))
+	       (or (alpha-char-p char) (char= char #\_)))))
 
 
 (defun evaluate-type-name (x)
   (let* ((name (car x)))
     (if (and (atom name) nil (null (cdr x)))
-      name)))
+        name)))
       
 
 (defun find-constant (x constants)
@@ -1093,76 +1090,76 @@
   (let ((expansion nil))
     (unless (= (length arguments) (length parameters))
       (c-parse-error stream "Expected ~D argument~:P to macro ~A but got ~D argument~:P."
-			 (length parameters) name (length arguments)))
+			               (length parameters) name (length arguments)))
     (loop while body
-      as token = (pop body)
-      as next = (first body)
-      as argno = (position token parameters) do
-      (cond ((and argno (eq next *sharp-sharp-symbol*)) ; parameter ## token/parameter
-	     (pop body)
-	     (setq next (pop body))
-	     (let ((next-argno (position next parameters)))
-	       (push (intern (concatenate 'string (c-stringize-token-list (nth argno arguments))
-					  (if next-argno
-					    (c-stringize-token-list (nth next-argno arguments))
-					    (c-stringize-token next))))
-		     expansion)))
-	    (argno			; normal parameter substitution
-	     (setq expansion (nreconc (expand-c-macros-in-token-list (nth argno arguments)
-                                                                     stream macros-not-to-expand
-                                                                     macro-table)
-				      expansion)))
-	    ((and (eq token *sharp-sharp-symbol*) ; token ## parameter
-		  (setq argno (position next parameters)))
-	     (pop body)
-	     (push (intern (concatenate 'string (c-stringize-token (pop expansion))
-					(c-stringize-token-list (nth argno arguments))))
-		   expansion))
-	    ((and (eq token *sharp-symbol*)	; # parameter
-		  (setq argno (position next parameters)))
-	     (pop body)
-	     (push (c-stringize-token-list (nth argno arguments)) expansion))
-	    (t (push token expansion))))
+          as token = (pop body)
+          as next = (first body)
+          as argno = (position token parameters) do
+            (cond ((and argno (eq next *sharp-sharp-symbol*)) ; parameter ## token/parameter
+	                 (pop body)
+	                 (setq next (pop body))
+	                 (let ((next-argno (position next parameters)))
+	                   (push (intern (concatenate 'string (c-stringize-token-list (nth argno arguments))
+					                                      (if next-argno
+					                                          (c-stringize-token-list (nth next-argno arguments))
+					                                          (c-stringize-token next))))
+		                       expansion)))
+	                (argno               ; normal parameter substitution
+	                 (setq expansion (nreconc (expand-c-macros-in-token-list (nth argno arguments)
+                                                                           stream macros-not-to-expand
+                                                                           macro-table)
+				                                    expansion)))
+	                ((and (eq token *sharp-sharp-symbol*) ; token ## parameter
+		                    (setq argno (position next parameters)))
+	                 (pop body)
+	                 (push (intern (concatenate 'string (c-stringize-token (pop expansion))
+					                                    (c-stringize-token-list (nth argno arguments))))
+		                     expansion))
+	                ((and (eq token *sharp-symbol*)	; # parameter
+		                    (setq argno (position next parameters)))
+	                 (pop body)
+	                 (push (c-stringize-token-list (nth argno arguments)) expansion))
+	                (t (push token expansion))))
     (expand-c-macros-in-token-list (nreverse expansion) stream
                                    (adjoin name macros-not-to-expand)
                                    macro-table)))
 
 (defun expand-c-macros-in-token-list (tokens stream macros-not-to-expand macro-table)
   (loop
-      while tokens
+    while tokens
     as token = (pop tokens)
     as macro = (and (symbolp token)
                     (not (member token macros-not-to-expand))
                     (macro-definition token macro-table))
     if macro
-    nconc (if (eq (first macro) :none) 
-            (expand-c-macros-in-token-list (second macro) stream 
-                                           (adjoin token macros-not-to-expand) macro-table)
-            (expand-c-macro token (first macro)
-                            (let ((open (pop tokens)))
-                              (unless (eq open *lparen-symbol*)
-                                (c-parse-error
-                                 stream
-                                 "~A where open parenthesis expected after macro name ~A"
-                                 open token))
-                              (loop with done = nil
-                                    collect
-                                    (loop as token = (if tokens (pop tokens)
-                                                       (c-parse-error stream
-                                                                      "Unexpected impossible EOF"))
-                                          with level = 0
-                                          do (cond ((eq token *lparen-symbol*) (incf level))
-                                                   ((eq token *rparen-symbol*)
-                                                    (if (plusp level) (decf level) (setq done t))))
-                                                  until (or done (and (zerop level)
-                                                                      (eq token *comma-symbol*)))
-                                                  collect token)
-                                    until done))
-                            (second macro) stream macros-not-to-expand macro-table))
+      nconc (if (eq (first macro) :none) 
+                (expand-c-macros-in-token-list (second macro) stream 
+                                               (adjoin token macros-not-to-expand) macro-table)
+                (expand-c-macro token (first macro)
+                                (let ((open (pop tokens)))
+                                  (unless (eq open *lparen-symbol*)
+                                    (c-parse-error
+                                     stream
+                                     "~A where open parenthesis expected after macro name ~A"
+                                     open token))
+                                  (loop with done = nil
+                                        collect
+                                        (loop as token = (if tokens (pop tokens)
+                                                             (c-parse-error stream
+                                                                            "Unexpected impossible EOF"))
+                                              with level = 0
+                                              do (cond ((eq token *lparen-symbol*) (incf level))
+                                                       ((eq token *rparen-symbol*)
+                                                        (if (plusp level) (decf level) (setq done t))))
+                                              until (or done (and (zerop level)
+                                                                  (eq token *comma-symbol*)))
+                                              collect token)
+                                        until done))
+                                (second macro) stream macros-not-to-expand macro-table))
     else collect token))
 
 (defun parse-c-expression (token-list &key  constants additional-constants 
-                                          expand-macros)
+                                        expand-macros)
   (labels ((next ()
              (unless token-list
                (fail "Unterminated expression or unbalanced parentheses"))
@@ -1186,18 +1183,18 @@
            (parse-assignment ()
              (let ((left (parse-conditional)))
                (if (eq (peek) 'c::|=|)
-                 (let ((right (progn (next) (parse-assignment))))
-                   (list 'setf left right))
-                 left)))
+                   (let ((right (progn (next) (parse-assignment))))
+                     (list 'setf left right))
+                   left)))
            (parse-conditional ()
              (let ((left (parse-logical-or)))
                (if (eq (peek) 'c::|?|)
-                 (let ((then (progn (next) (parse-expression)))
-                       (else (if (eq (peek) 'c::|:|)
-                               (progn (next) (parse-conditional))
-                               (fail "~A where : was expected" (peek)))))
-                   (list 'if left then else))
-                 left)))
+                   (let ((then (progn (next) (parse-expression)))
+                         (else (if (eq (peek) 'c::|:|)
+                                   (progn (next) (parse-conditional))
+                                   (fail "~A where : was expected" (peek)))))
+                     (list 'if left then else))
+                   left)))
            (parse-logical-or ()
              (let ((left (parse-logical-and)))
                (loop while (eq (peek) 'c::|\|\||)
@@ -1253,8 +1250,8 @@
                (loop while (member (peek) '(c::|.*| c::|->*|))
                      do (setq left (list (next) left (parse-unary))))
                left))
-           (parse-unary ()              ; subsumes parse-cast, thus accepting some invalid programs
-             (let ((token (next)))      ; --- doesn't support new and delete yet
+           (parse-unary () ; subsumes parse-cast, thus accepting some invalid programs
+             (let ((token (next))) ; --- doesn't support new and delete yet
                (cond ((member token '(c::|+| c::|-| c::|!| c::|~| c::|++| c::|--|))
                       ;;--- doesn't yet have special support for calling destructors...
                       (list token (parse-unary)))
@@ -1263,7 +1260,7 @@
                      ((eq token 'c::|&|)
                       (list 'c::address-of (parse-unary)))
                      ((eq token 'c::|sizeof|)
-                      (unless (eq (peek) *lparen-symbol*)          ; Require open paren, maybe it's really optional
+                      (unless (eq (peek) *lparen-symbol*) ; Require open paren, maybe it's really optional
                         (fail "~A where ( was expected after sizeof" (peek)))
                       (next)            ; Swallow open parenthesis
                       `(c::size-of (c::resolve-type ,(loop as token = (next)
@@ -1273,90 +1270,90 @@
            (parse-postfix (token)
              (loop with left = (parse-primary token)
                    as right =  (peek) do
-                   (setq left
-                         (cond ((eq right *leftbracket-symbol*)
-                                (next)          ; swallow [
-                                (let ((subscript (parse-expression))
-                                      (delimiter (next)))
-                                  (unless (eq delimiter *rightbracket-symbol*)
-                                  (fail "~A where ] expected after subscript" delimiter))
-                                  `(c::aref ,left ,subscript)))
-                               ((eq right *lparen-symbol*)
-                                (next)          ; swallow open parenthesis
-                                (let ((macro (and expand-macros
-                                                  (identifierp left)
-                                                  (macro-definition left expand-macros))))
-                                  (cond ((and macro (not (eq (first macro) ':none)))
-                                         ;; Function-like macro - constant-like was alraedy handled
-                                         (let ((more-tokens 
-                                                (expand-c-macro left (first macro)
-                                                                (collect-macro-arguments)
-                                                                (second macro) nil '()
-                                                                expand-macros)))
-                                           (setq token-list (append more-tokens token-list))
-                                           (parse-expression)))
-                                        ((valid-type-name? (list left))
-                                         ;; This is an explicit type conversion
-                                         `(c::cast ,(evaluate-type-name (list left))
-                                           ,@(parse-argument-list)))
-                                        (t nil #|`(c::call ,left ,@(parse-argument-list))|#))))
-                               ((memq right '(c::|.| c::|->|))
-                                (next)          ; swallow operator
-                                `(,right ,left ,(parse-primary (next))))  ; parse-name, really
-                               ((eq right 'c::|++|)
-                                (next)          ; swallow operator
-                                `(c::postfix++ ,left))
-                               ((eq right 'c::|--|)
-                                (next)          ; swallow operator
-                                `(c::postfix-- ,left))
-                               (t (return left))))))
+                     (setq left
+                           (cond ((eq right *leftbracket-symbol*)
+                                  (next) ; swallow [
+                                  (let ((subscript (parse-expression))
+                                        (delimiter (next)))
+                                    (unless (eq delimiter *rightbracket-symbol*)
+                                      (fail "~A where ] expected after subscript" delimiter))
+                                    `(c::aref ,left ,subscript)))
+                                 ((eq right *lparen-symbol*)
+                                  (next) ; swallow open parenthesis
+                                  (let ((macro (and expand-macros
+                                                    (identifierp left)
+                                                    (macro-definition left expand-macros))))
+                                    (cond ((and macro (not (eq (first macro) ':none)))
+                                           ;; Function-like macro - constant-like was alraedy handled
+                                           (let ((more-tokens 
+                                                   (expand-c-macro left (first macro)
+                                                                   (collect-macro-arguments)
+                                                                   (second macro) nil '()
+                                                                   expand-macros)))
+                                             (setq token-list (append more-tokens token-list))
+                                             (parse-expression)))
+                                          ((valid-type-name? (list left))
+                                           ;; This is an explicit type conversion
+                                           `(c::cast ,(evaluate-type-name (list left))
+                                                     ,@(parse-argument-list)))
+                                          (t nil #|`(c::call ,left ,@(parse-argument-list))|#))))
+                                 ((memq right '(c::|.| c::|->|))
+                                  (next) ; swallow operator
+                                  `(,right ,left ,(parse-primary (next)))) ; parse-name, really
+                                 ((eq right 'c::|++|)
+                                  (next) ; swallow operator
+                                  `(c::postfix++ ,left))
+                                 ((eq right 'c::|--|)
+                                  (next) ; swallow operator
+                                  `(c::postfix-- ,left))
+                                 (t (return left))))))
            (parse-primary (token)
-               (cond ((identifierp token)
-                        ;; nonqualified name
-                        (let ((value (find-constant token constants)))
-                          (cond (value 
-                                 (setq value (list value) token-list `(,@value #.*rparen-symbol* ,@token-list))
-                                 (parse-parenthesized))
-                                ((setq value (assoc token additional-constants))
-                                 (cdr value))
-                                ((and expand-macros
-                                      (setq value (macro-definition-of-token token))
-                                      (eq (first value) ':none))
-                                 (setq token-list (append (expand-c-macros-in-token-list 
-                                                           (second value) nil (list token) expand-macros)
-                                                          token-list ))
-                                 (parse-primary (next)))
-                                (t token))))
-                     ((eq token *lparen-symbol*)
-                      (let* ((save-token-list token-list)
-                            (type-name (collect-parenthesized))
-                            (type (valid-type-name? type-name)))
-                        (cond (type
-                               ;; This is a cast
-                               ;; Doing cast here is easier but accepts some invalid programs
-                               (progn
-                                 `(c::cast (,type) ,(parse-unary))))
-                              (t
-                               ;; These are ordinary grouping parentheses
-                               (setq token-list save-token-list)
-                               (parse-parenthesized)))))
-                     ((eq token 'c::|{|)
-                      (cons 'c::curly-bracketed-list
-                            (loop as token = (next)
-                                  until (eq token 'c::|}|)
-                                  do (unread token)
-                                  collect (parse-expression)
-                                  do (let ((delimiter (peek)))
-                                       (case delimiter
-                                         (c::|,| (next))
-                                         (c::|}| )
-                                         (otherwise 
-                                          (fail "~A where , or } was expected" delimiter)))))))
-                     ((numberp token) token)
-                     ((stringp token) token)
-                     ((eq token 'c::|::|)
-                      (fail "Unary :: is not supported yet"))
-                     (t (fail "~A is unrecognized syntax in an expression" token))))
+             (cond ((identifierp token)
+                    ;; nonqualified name
+                    (let ((value (find-constant token constants)))
+                      (cond (value 
+                             (setq value (list value) token-list `(,@value #.*rparen-symbol* ,@token-list))
+                             (parse-parenthesized))
+                            ((setq value (assoc token additional-constants))
+                             (cdr value))
+                            ((and expand-macros
+                                  (setq value (macro-definition-of-token token))
+                                  (eq (first value) ':none))
+                             (setq token-list (append (expand-c-macros-in-token-list 
+                                                       (second value) nil (list token) expand-macros)
+                                                      token-list ))
+                             (parse-primary (next)))
+                            (t token))))
+                   ((eq token *lparen-symbol*)
+                    (let* ((save-token-list token-list)
+                           (type-name (collect-parenthesized))
+                           (type (valid-type-name? type-name)))
+                      (cond (type
+                             ;; This is a cast
+                             ;; Doing cast here is easier but accepts some invalid programs
+                             (progn
+                               `(c::cast (,type) ,(parse-unary))))
+                            (t
+                             ;; These are ordinary grouping parentheses
+                             (setq token-list save-token-list)
+                             (parse-parenthesized)))))
+                   ((eq token 'c::|{|)
+                    (cons 'c::curly-bracketed-list
+                          (loop as token = (next)
+                                until (eq token 'c::|}|)
+                                do (unread token)
+                                collect (parse-expression)
+                                do (let ((delimiter (peek)))
+                                     (case delimiter
+                                       (c::|,| (next))
+                                       (c::|}| )
+                                       (otherwise 
+                                        (fail "~A where , or } was expected" delimiter)))))))
+                   ((numberp token) token)
+                   ((stringp token) token)
+                   ((eq token 'c::|::|)
+                    (fail "Unary :: is not supported yet"))
+                   (t (fail "~A is unrecognized syntax in an expression" token))))
            (parse-parenthesized ()
              (prog1 (parse-expression)
                (let ((close (next)))
@@ -1364,20 +1361,20 @@
                    (fail "~A where ) was expected" close)))))
            (parse-argument-list ()
              (if (eq (peek) *rparen-symbol*)
-               (progn (next) '())
-               (loop as arg = (parse-expression)
-                     as delimiter = (next)
-                     collect arg
-                     do (unless (or (eq delimiter 'c::|,|) (eq delimiter *rparen-symbol*))
-                          (fail "~A where , or ) expected in function arguments"
-                                delimiter))
-                     while (eq delimiter 'c::|,|))))
+                 (progn (next) '())
+                 (loop as arg = (parse-expression)
+                       as delimiter = (next)
+                       collect arg
+                       do (unless (or (eq delimiter 'c::|,|) (eq delimiter *rparen-symbol*))
+                            (fail "~A where , or ) expected in function arguments"
+                                  delimiter))
+                       while (eq delimiter 'c::|,|))))
            (collect-macro-arguments ()
              (loop with done = nil with first = t
                    collect (loop as token = (next) with level = 0
                                  do (cond ((eq token *lparen-symbol*) (incf level))
                                           ((eq token *rparen-symbol*) 
-                                           (when first   ; () has to be treated as a special case
+                                           (when first ; () has to be treated as a special case
                                              (return-from collect-macro-arguments '()))
                                            (if (plusp level) (decf level) (setq done t))))
                                     (setq first nil)
@@ -1392,7 +1389,7 @@
                tailp
                (return-from valid-type-name?
                  (if (and type (not (eq type *the-ffi-void-type*)))
-                   type)))
+                     type)))
                                               
              ;; At least one type-specifier followed by an optional abstract-declarator
              ;; For now the type-specifier cannot contain :: and the only
@@ -1403,7 +1400,7 @@
                    ((and (identifierp (car token-list))
                          (find-user-or-primitive-type (car token-list)))
                     (valid-type-name? (cdr token-list) t))
-                   ;((eq (car token-list) '|::|) (valid-type-name? (cdr token-list)))
+                                        ;((eq (car token-list) '|::|) (valid-type-name? (cdr token-list)))
                    ((and tailp (eq (car token-list) 'c::|*|))
                     (valid-type-name? (cdr token-list) t))
                    (t nil))))
@@ -1431,55 +1428,54 @@
 
 (defun install-new-db-files (ftd d)
   (let* ((dir (merge-pathnames (interface-dir-subdir d)
-			       (ftd-interface-db-directory ftd))))
+			                         (ftd-interface-db-directory ftd))))
     (flet ((rename-and-reopen (was-open path newpath)
-	     (let* ((path (merge-pathnames path dir))
-		    (newpath (merge-pathnames newpath dir)))
-	       (when was-open
-		 (cdb-close was-open))
-	       (when (probe-file path)
-		 (rename-file path
-			      (concatenate 'string (namestring (truename path)) "-BAK")
-			      :if-exists :supersede))
-	       (rename-file newpath path)
-	       (when was-open
-		 (cdb-open path)))))
+	           (let* ((path (merge-pathnames path dir))
+		                (newpath (merge-pathnames newpath dir)))
+	             (when was-open
+		             (cdb-close was-open))
+	             (when (probe-file path)
+		             (rename-file path
+			                        (concatenate 'string (namestring (truename path)) "-BAK")
+			                        :if-exists :supersede))
+	             (rename-file newpath path)
+	             (when was-open
+		             (cdb-open path)))))
       (without-interrupts
-       (setf (interface-dir-constants-interface-db-file d)
-	     (rename-and-reopen
-	      (interface-dir-constants-interface-db-file d)
-	      "constants.cdb"
-	      "new-constants.cdb"))
-       (setf (interface-dir-functions-interface-db-file d)
-	     (rename-and-reopen
-	      (interface-dir-functions-interface-db-file d)
-	      "functions.cdb"
-	      "new-functions.cdb"))
-       (setf (interface-dir-records-interface-db-file d)
-	     (rename-and-reopen
-	      (interface-dir-records-interface-db-file d)
-	      "records.cdb"
-	      "new-records.cdb"))
-       (setf (interface-dir-types-interface-db-file d)
-	     (rename-and-reopen
-	      (interface-dir-types-interface-db-file d)
-	      "types.cdb"
-	      "new-types.cdb"))
-       (setf (interface-dir-vars-interface-db-file d)
-	     (rename-and-reopen
-	      (interface-dir-vars-interface-db-file d)
-	      "vars.cdb"
-	      "new-vars.cdb"))
-       (setf (interface-dir-objc-classes-interface-db-file d)
-	     (rename-and-reopen
-	      (interface-dir-objc-classes-interface-db-file d)
-	      "objc-classes.cdb"
-	      "new-objc-classes.cdb"))
-       (setf (interface-dir-objc-methods-interface-db-file d)
-	     (rename-and-reopen
-	      (interface-dir-objc-methods-interface-db-file d)
-	      "objc-methods.cdb"
-	      "new-objc-methods.cdb")))))
+        (setf (interface-dir-constants-interface-db-file d)
+	            (rename-and-reopen
+	             (interface-dir-constants-interface-db-file d)
+	             "constants.cdb"
+	             "new-constants.cdb"))
+        (setf (interface-dir-functions-interface-db-file d)
+	            (rename-and-reopen
+	             (interface-dir-functions-interface-db-file d)
+	             "functions.cdb"
+	             "new-functions.cdb"))
+        (setf (interface-dir-records-interface-db-file d)
+	            (rename-and-reopen
+	             (interface-dir-records-interface-db-file d)
+	             "records.cdb"
+	             "new-records.cdb"))
+        (setf (interface-dir-types-interface-db-file d)
+	            (rename-and-reopen
+	             (interface-dir-types-interface-db-file d)
+	             "types.cdb"
+	             "new-types.cdb"))
+        (setf (interface-dir-vars-interface-db-file d)
+	            (rename-and-reopen
+	             (interface-dir-vars-interface-db-file d)
+	             "vars.cdb"
+	             "new-vars.cdb"))
+        (setf (interface-dir-objc-classes-interface-db-file d)
+	            (rename-and-reopen
+	             (interface-dir-objc-classes-interface-db-file d)
+	             "objc-classes.cdb"
+	             "new-objc-classes.cdb"))
+        (setf (interface-dir-objc-methods-interface-db-file d)
+	            (rename-and-reopen
+	             (interface-dir-objc-methods-interface-db-file d)
+	             "objc-methods.cdb"
+	             "new-objc-methods.cdb")))))
   t)
-
 
